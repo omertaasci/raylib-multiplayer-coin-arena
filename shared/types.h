@@ -1,7 +1,7 @@
 #ifndef TYPES_H
 #define TYPES_H
 
-// Thia file contains type definitions that are used across the project
+// This file contains type definitions that are used across the project
 
 // game screen width and height
 #define SCREEN_WIDTH 900 

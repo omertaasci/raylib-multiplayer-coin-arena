@@ -3,14 +3,17 @@
 
 void Coin_Init(CoinState *coin, float radius, int screenWidth, int screenHeight)
 {
-    coin->radius = radius;
-    coin->activate = 1;
+    coin->radius = radius; // sets the coin size to radius
+    coin->activate = 1; // means coin is there
 
-    Coin_Respawn(coin, screenWidth, screenHeight);
+    Coin_Respawn(coin, screenWidth, screenHeight); // calls the func to put coin somewhere random on the screen
 }
 
 void Coin_Respawn(CoinState *coin, int screenWidth, int screenHeight)
 {
+    // picks a random x,y position for the coin
+
+    // uses coin radius to make sure coin doesnt go off the edges
     int minX = (int)coin->radius;
     int maxX = screenWidth - (int)coin->radius;
 
@@ -28,7 +31,8 @@ int Coin_CheckPlayerCollision(const PlayerState *player, const CoinState *coin)
         return 0;
     }
     
-    float dx = player->position.x - coin->position.x;
+    // difference between player and coin positions
+    float dx = player->position.x - coin->position.x; 
     float dy = player->position.y - coin->position.y;
 
     float distanceSquared = dx * dx + dy * dy;
@@ -39,6 +43,8 @@ int Coin_CheckPlayerCollision(const PlayerState *player, const CoinState *coin)
 
 void Coin_Draw(const CoinState *coin)
 {
+    // if coin is active it appears on screen in gold color
+
     if (!coin->activate)
     {
         return;

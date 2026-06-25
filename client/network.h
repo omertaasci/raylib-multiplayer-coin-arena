@@ -14,7 +14,7 @@ typedef struct NetworkClient
 {
     SocketHandle socket; // server socket
     int connected; // 1 connected, 0 not connected
-    int played_id; // player id given by server
+    int player_id; // player id given by server
 } NetworkClient;
 
 // starts systems like winsock

@@ -3,6 +3,7 @@
 
 // the default port that server will listen on
 #define SERVER_PORT 7777
+#define MAX_PLAYERS 16
 
 // packet types
 // client and server should agree based on these values
@@ -35,5 +36,39 @@ typedef struct WelcomePacket
 {
     int player_id;
 } WelcomePacket;
+
+
+typedef struct InputPacket
+{
+    int up;
+    int down;
+    int left;
+    int right;
+} InputPacket;
+
+typedef struct NetPlayerState
+{
+    int id;
+    float x;
+    float y;
+    float radius;
+    int score;
+    int active;
+} NetPlayerState;
+
+typedef struct NetCoinState
+{
+    float x;
+    float y;
+    float radius;
+    int active;
+} NetCoinState;
+
+typedef struct WorldStatePacket
+{
+    int player_count;
+    NetPlayerState players[MAX_PLAYERS];
+    NetCoinState coin;
+} WorldStatePacket;
 
 #endif

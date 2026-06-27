@@ -19,6 +19,24 @@ void Game_Init(Game *game)
         SCREEN_WIDTH,
         SCREEN_HEIGHT
     );
+
+    NetworkClient_Init(&game->network);
+
+    game->onlineMode = NetworkClient_Connect(
+        &game->network,
+        "127.0.0.1",
+        SERVER_PORT
+    );
+
+    if (game->onlineMode)
+    {
+        game->player.id = game->network.player_id;
+    }
+}
+
+void Game_ShutDown(Game *game)
+{
+    NetworkClient_Close(&game->network);
 }
 
 void Game_Restart(Game *game)
@@ -50,5 +68,5 @@ void Game_Draw(const Game *game)
 
     Coin_Draw(&game->coin);
     Player_Draw(&game->player);
-    UI_DrawHud(game->player.score);
+    UI_DrawHud(game->player.score, game->onlineMode, game->player.id);
 }

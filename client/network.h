@@ -16,13 +16,18 @@ typedef int SocketHandle;
 typedef struct NetworkClient
 {
     SocketHandle socket;
-    int connected;
+    int connected; // 1 connected 0 not connected
     int player_id;
 
 } NetworkClient;
 
-int Network_InitSystem(void);
-void Network_ShutdownSystem(void);
+int NetworkClient_SendInput(NetworkClient *client, InputPacket input); // sends input packet
+
+int NetworkClient_ReceiveWorldState(NetworkClient *client, WorldStatePacket *outState); // gets game state from server
+
+int Network_InitSystem(void); // starts the winsock for windows
+
+void Network_ShutdownSystem(void); // closes the socket
 
 void NetworkClient_Init(NetworkClient *client);
 

@@ -1,5 +1,7 @@
 #include "server.h"
 #include "../shared/protocol.h"
+#include "world.h"
+#include "client_session.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -17,9 +19,11 @@ typedef SOCKET SocketHandle; // rename SOCKET type to SocketHandle
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <sys/socket.h>
+#include <fcntl.h>
 #endif
 
 // sends all bytes untill the entire buffer is sent
+// because sometimes send() doesn't send the whole buffer
 static int SendAll(SocketHandle socket, const void *buffer, int size)
 {
     // converts generic pointer into byte pointer for byte by byte access
@@ -40,7 +44,8 @@ static int SendAll(SocketHandle socket, const void *buffer, int size)
     return 1; // success
 }
 
-// rreceives all bytes until the requested size is fully received
+// receives all bytes until the requested size is fully received
+// because sometimes recv() doesn't receive all the buffer
 static int RecvAll(SocketHandle socket, void *buffer, int size)
 {
     char *data = (char *)buffer; // convert buffer into byte pointer
@@ -60,7 +65,7 @@ static int RecvAll(SocketHandle socket, void *buffer, int size)
     return 1;
 }
 
-//send a packet and optional payload
+// send a packet and optional payload
 static int SendPacket(SocketHandle socket, int type, const void *payload, int payloadSize)
 {
     PacketHeader header;
@@ -72,7 +77,7 @@ static int SendPacket(SocketHandle socket, int type, const void *payload, int pa
         return 0;
     }
 
-    if (payloadSize > 0 && payload != NULL) // if payload existc send it too
+    if (payloadSize > 0 && payload != NULL) // if payload exists send it too
     {
         if (!SendAll(socket, payload, payloadSize))
         {
@@ -80,6 +85,47 @@ static int SendPacket(SocketHandle socket, int type, const void *payload, int pa
         }
     }
     return 1;
+}
+
+// wrapper function that makes it easier to send world state packet
+static int SendWorldState(SocketHandle socket, WorldStatePacket *state)
+{
+    return SendPacket(socket, PACKET_WORLD_STATE, state, sizeof(WorldStatePacket));
+}
+
+static int ReceiveInputIfAvailable(SocketHandle socket, InputPacket *outInput)
+{
+    PacketHeader header;
+
+    if (!RecvAll(socket, &header, sizeof(header)))
+    {
+        return 0;
+    }
+
+
+    if (header.type != PACKET_INPUT || header.size != sizeof(InputPacket))
+    {
+        return 0;
+    }
+
+    if (!RecvAll(socket, outInput, sizeof(InputPacket)))
+    {
+        return 0;
+    }
+
+    return 1;
+}
+
+// make socket non-blocking so recv() does not freeze server
+static void SetSocketNonBlocking(SocketHandle socket) 
+{
+#ifdef _WIN32
+    u_long mode = 1;
+    ioctlsocket(socket, FIONBIO, &mode);
+#else
+    int flags = fcntl(socket, F_GETFL, 0);
+    fcntl(socket, F_SETFL, flags | O_NONBLOCK);
+#endif
 }
 
 int Server_Run(int port) // main server function
@@ -105,10 +151,11 @@ int Server_Run(int port) // main server function
     memset(&serverAddress, 0, sizeof(serverAddress)); // clear the structure memory
 
     serverAddress.sin_family = AF_INET; // use ipv4
-    serverAddress.sin_addr.s_addr = INADDR_ANY; // accept connevtion from any ip
+    serverAddress.sin_addr.s_addr = INADDR_ANY; // accept connection from any ip
     serverAddress.sin_port = htons((unsigned short)port); // set port number
 
     // bind socket to ip address and port
+    // e.g this socket should use that port 
     if (bind(listenSocket, (struct sockaddr *)&serverAddress, sizeof(serverAddress)) < 0)
     {
         printf("[SERVER] bind failed\n");
@@ -121,61 +168,104 @@ int Server_Run(int port) // main server function
         return 0;
     }
 
+    ServerWorld world;
+    ClientSession sessions[MAX_PLAYERS]; // client list
+
+    World_Init(&world); // starts the game world
+
+    for (int i = 0; i < MAX_PLAYERS; i++)
+    {
+        ClientSession_Init(&sessions[i]);
+    }
+
     printf("[SERVER] listening on port %d\n", port);
-
-    SocketHandle clientSocket = accept(listenSocket, NULL, NULL); // wait for client connection
-
-    if (clientSocket == 0) // check if accept connection failed
+    while (1)
     {
-        printf("[SERVER] accept failed\n");
-        return 0;
+    SocketHandle newClient = accept(listenSocket, NULL, NULL); // accepts new client connection
+
+    #ifdef _WIN32
+    if (newClient != INVALID_SOCKET)
+    #else
+    if (newClient >= 0)
+    #endif
+    {
+        SetSocketNonBlocking(newClient); // because recv can freeze the server
+
+        int playerId = World_AddPlayer(&world); // adds the new player
+
+        if (playerId != -1)
+        {
+            for (int i = 0; i < MAX_PLAYERS; i++)
+            {
+                if (!sessions[i].active) // looks for an empty slot
+                {
+                    sessions[i].socket = newClient;
+                    sessions[i].active = 1;
+                    sessions[i].playerId = playerId;
+
+                    WelcomePacket welcome; // packet that contains assigned player id
+                    welcome.player_id = playerId;
+
+                    SendPacket(
+                        newClient,
+                        PACKET_WELCOME,
+                        &welcome,
+                        sizeof(welcome)
+                    );
+
+                    printf("[SERVER] client joined player_id=%d\n", playerId);
+
+                    break;
+                }
+            }
+        }
     }
 
-    printf("[SERVER] client connected\n");
-
-    PacketHeader header; // incoming packet header
-
-    if (!RecvAll(clientSocket, &header, sizeof(header))) //read packet header
+    for (int i = 0; i < MAX_PLAYERS; i++)
     {
-        printf("[SERVER] failed to read header\n");
-        return 0;
+        if (!sessions[i].active)
+        {
+            continue;
+        }
+
+        InputPacket input;
+
+        // if client sent input update player input in world
+        if (ReceiveInputIfAvailable(sessions[i].socket, &input))
+        {
+            World_SetInput(
+                &world,
+                sessions[i].playerId,
+                input
+            );
+        }
     }
 
-    // verify packet type and expected size
-    if (header.type != PACKET_HELLO || header.size != sizeof(HelloPacket))
+    World_Update(&world, 1.0f / 30.0f); // server tick 30 fps
+    // which means server processes and updates the world 30 times per second
+
+    WorldStatePacket state;
+
+    World_BuildState(&world, &state);
+
+    for (int i = 0; i < MAX_PLAYERS; i++)
     {
-        printf("[SERVER] unexpected packet\n");
-        return 0;
+        if (sessions[i].active)
+        {
+            // sends the world state to all clients
+            SendWorldState(
+                sessions[i].socket,
+                &state
+            );
+        }
     }
 
-    HelloPacket hello; // scturct for hello packet
-
-    if (!RecvAll(clientSocket, &hello, sizeof(hello))) // read hello packet data
-    {
-        printf("[SERVER] failed to read HELLO\n");
-        return 0;
+    #ifdef _WIN32
+    Sleep(33); // so cpu wouldn't be %100
+    #else
+    usleep(33000); // so cpu wouldn't be %100
+    #endif
     }
 
-    printf("[SERVER] received HELLO version=%d\n", hello.version); // client version
-    
-    WelcomePacket welcome;
-    welcome.player_id = 1; // assign player id
 
-    //send welcome packet to client
-    SendPacket(clientSocket, PACKET_WELCOME, &welcome, sizeof(welcome));
-
-    printf("[SERVER] sent WELCOME player_id=1\n");
-
-#ifdef _WIN32
-    // close sockets on windows
-    closesocket(clientSocket);
-    closesocket(listenSocket);
-    // shutdown winsock
-    WSACleanup();
-#else
-    // close sockets on linux 
-    close(clientSocket);
-    close(listenSocket);
-#endif
-    return 1; // server finished successfully
 }

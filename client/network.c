@@ -17,18 +17,20 @@
 #include <sys/socket.h>
 #endif
 
-// sends all bytes until the full buffer is sent 
+// sends all bytes until the full buffer is sent
+// sometimes send() doesn't send the all the data
 static int SendAll(SocketHandle socket, const void *buffer, int size)
 {
     // convert generic pointer into byte pointer
+    // because buffer type is unknown and send expects byte type
     const char *data = (const char *)buffer;
 
-    int sentTotal = 0 ;// total sent bytes
+    int sentTotal = 0 ; // total sent bytes
 
     while (sentTotal < size) // keep sending until everything is sent
     {
         int sent = send(socket, data + sentTotal, size - sentTotal, 0); // send remaining bytes
-
+        // if there is 100 bytes and 40 has been sent starts from 40 and keeps working until all is sent
         if (sent <= 0) // if sending failed or connection closed
         {
             return 0; // failure
@@ -39,6 +41,10 @@ static int SendAll(SocketHandle socket, const void *buffer, int size)
     return 1; // success
 }
 
+// receives all the bytes until full buffer is received
+// recv() doesnt give all buffer at once
+// e.g packet is 200 bytes at first call it gets 70 then 50 then 80 etc
+// thats why it's in while loop so it would work untill it's done
 static int RecvAll(SocketHandle socket, void *buffer, int size)
 {
     char *data = (char *)buffer;
@@ -101,11 +107,12 @@ void Network_ShutdownSystem(void)
 #endif
 }
 
-void NetworkClient_Init(NetworkClient *client) // initialize client structure
+void NetworkClient_Init(NetworkClient *client) // cleaning the network data for startup
+// prevents memory bugs
 {
     client->socket = 0; // no socket yet
     client->connected = 0; // not connected
-    client->player_id = -1; // onvalid player id
+    client->player_id = -1; // invalid player id
 }
 
 int NetworkClient_Connect(NetworkClient *client, const char *ip, int port) // connect client to server
@@ -118,11 +125,12 @@ int NetworkClient_Connect(NetworkClient *client, const char *ip, int port) // co
         return 0;
     }
 
-    struct sockaddr_in serverAddress; // server adr struct
-    memset(&serverAddress, 0, sizeof(serverAddress)); // clear struct memory
+    struct sockaddr_in serverAddress; // server address struct contains IP, port, protocol family
+
+    memset(&serverAddress, 0, sizeof(serverAddress)); // clear struct memory we don't want garbage memory
 
     serverAddress.sin_family = AF_INET; // use ipv4
-    serverAddress.sin_port = htons((unsigned short)port); // server port
+    serverAddress.sin_port = htons((unsigned short)port); // converts port to network format
 
     if (inet_pton(AF_INET, ip, &serverAddress.sin_addr) <= 0) // convert ip str to binary addr
     {
@@ -131,7 +139,7 @@ int NetworkClient_Connect(NetworkClient *client, const char *ip, int port) // co
         return 0;
     }
 
-    // connect to server
+    // try to connect to the server
     if (connect(client->socket, (struct sockaddr *) &serverAddress, sizeof(serverAddress)) < 0)
     {
         printf("[CLIENT] connect failed, offline mode\n");
@@ -141,10 +149,10 @@ int NetworkClient_Connect(NetworkClient *client, const char *ip, int port) // co
         return 0;
     }
 
-    HelloPacket hello;
+    HelloPacket hello; // says to server hi im connected
     hello.version = 1;
 
-    if (!SendPacket(client->socket, PACKET_HELLO, &hello, sizeof(hello))) // send hello packet to server
+    if (!SendPacket(client->socket, PACKET_HELLO, &hello, sizeof(hello))) // try to send hello packet to server
     {
         printf("[CLIENT] failed to send HELLLO\n");
         NetworkClient_Close(client);
@@ -153,7 +161,7 @@ int NetworkClient_Connect(NetworkClient *client, const char *ip, int port) // co
     
     PacketHeader header;
 
-    if (!RecvAll(client->socket, &header, sizeof(header)))
+    if (!RecvAll(client->socket, &header, sizeof(header))) // try to receive header
     {
         printf("[CLIENT] failed to receive header\n");
         NetworkClient_Close(client);
@@ -161,6 +169,7 @@ int NetworkClient_Connect(NetworkClient *client, const char *ip, int port) // co
     }
 
     // verify expected packet type and size
+    // checks that is this the packet that is expected
     if (header.type != PACKET_WELCOME || header.size != sizeof(WelcomePacket))
     {
         printf("[CLIENT] unexpected packet\n");
@@ -168,7 +177,7 @@ int NetworkClient_Connect(NetworkClient *client, const char *ip, int port) // co
         return 0;
     }
     
-    WelcomePacket welcome;
+    WelcomePacket welcome; // server tells you welcome to my server
     
     if (!RecvAll(client->socket, &welcome, sizeof(welcome)))
     {
@@ -185,7 +194,7 @@ int NetworkClient_Connect(NetworkClient *client, const char *ip, int port) // co
     return 1; // success
 }
 
-void NetworkClient_Close(NetworkClient *client)
+void NetworkClient_Close(NetworkClient *client) // closes the socket
 {
     if (client->socket != 0)
     {
@@ -200,4 +209,39 @@ void NetworkClient_Close(NetworkClient *client)
     client->socket = 0;
     client->connected = 0;
     client->player_id = -1;
+}
+
+int NetworkClient_SendInput(NetworkClient *client, InputPacket input) // sends to server keyboard input e.g WASD
+{
+    if (!client->connected)
+    {
+        return 0;
+    }
+
+    return SendPacket(client->socket, PACKET_INPUT, &input, sizeof(InputPacket));
+}
+
+// server sends world state it contains all players, scores, coin positions
+int NetworkClient_ReceiveWorldState(NetworkClient *client, WorldStatePacket *outState)
+{
+    if (!client->connected)
+    {
+        return 0;
+    }
+
+    PacketHeader header;
+
+    if (!RecvAll(client->socket, &header, sizeof(header)))
+    {
+        return 0;
+    }
+    if (header.type != PACKET_WORLD_STATE || header.size != sizeof(WorldStatePacket))
+    {
+        return 0;
+    }
+    if (!RecvAll(client->socket, outState, sizeof(WorldStatePacket)))
+    {
+        return 0;
+    }
+    return 1;
 }

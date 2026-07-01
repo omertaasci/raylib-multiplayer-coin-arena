@@ -27,6 +27,8 @@ echo Building server...
 gcc ^
 server/main.c ^
 server/server.c ^
+server/world.c ^
+server/client_session.c ^
 -o server.exe ^
 -I server ^
 -I shared ^

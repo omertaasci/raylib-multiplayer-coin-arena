@@ -32,8 +32,8 @@ typedef struct ServerWorld
 
 void World_Init(ServerWorld *world);
 int World_AddPlayer(ServerWorld *world);
-int World_RemovePlayer(ServerWorld *world, int playerId);
-int World_SetInput(ServerWorld *world, int playerId, InputPacket input);
+void World_RemovePlayer(ServerWorld *world, int playerId);
+void World_SetInput(ServerWorld *world, int playerId, InputPacket input);
 void World_Update(ServerWorld *world, float dt);
 void World_BuildState(ServerWorld *world, WorldStatePacket *outState);
 

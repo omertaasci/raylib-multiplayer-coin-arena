@@ -2,15 +2,19 @@
 #define GAME_H
 
 #include "../shared/types.h"
+#include "../shared/protocol.h"
 #include "network.h"
 
 typedef struct Game
 {
-    PlayerState player; // offline player
-    CoinState coin; // coin
+    PlayerState offlinePlayer; // offline player
+    CoinState offlineCoin; // coin
 
     NetworkClient network; // server connection
     int onlineMode; // 1 online, 0 offline
+    int playerId;
+
+    WorldStatePacket worldState;
 
 } Game;
 
